@@ -1,0 +1,199 @@
+Project Overview
+3-tier app architecture:
+
+Frontend → Static HTML (index.html), served via NGINX
+
+Backend → FastAPI app with game logic, API endpoints, SQLite database
+
+Database → SQLite (scores.db) inside backend, stores scores
+
+The goal is to Containerize entire app using Docker, allow frontend ↔ backend communication, and persist data via volume.
+
+Project structure
+number-guessing-app/
+ ├── backend/              # FastAPI backend
+ │    ├── app/             # Application code
+ │    ├── data/            # SQLite DB storage
+ │    ├── requirements.txt
+ │    └── Dockerfile
+ ├── frontend/             # Static HTML frontend
+ │    ├── index.html
+ │    └── Dockerfile
+ ├── docker-compose.yml    # Docker Compose configuration
+ └── README.md
+
+#Backend Setup
+Move SQLite DB to a folder for volume mount:
+mkdir backend/data
+mv backend/scores.db backend/data/scores.db
+
+Update database path in database.py:
+
+# OLD
+SQLALCHEMY_DATABASE_URL = "sqlite:///./scores.db"
+# NEW
+SQLALCHEMY_DATABASE_URL = "sqlite:///./data/scores.db"
+
+Create backend Dockerfile (backend/Dockerfile):
+
+FROM python:3.10-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+EXPOSE 8000
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+Build backend image:
+
+docker build -t number-backend ./backend
+
+Create Docker volume for database:
+
+docker volume create number-db
+
+Run backend container on network with volume:
+
+docker run -d --name backend --network number-network \
+  -p 8000:8000 -v number-db:/app/data number-backend
+
+Volume ensures scores persist even after container removal.
+
+#Frontend Setup
+Update frontend API calls in index.html or JS:
+// OLD
+fetch("http://localhost:8000/guess")
+// NEW
+fetch("http://backend:8000/guess")
+
+backend → container name of backend
+Ensures internal Docker network communication
+Dockerize frontend (frontend/Dockerfile):
+
+FROM nginx:alpine
+COPY . /usr/share/nginx/html
+EXPOSE 80
+
+Build frontend image:
+
+docker build -t number-frontend ./frontend
+
+Run frontend container on same network:
+
+docker run -d --name frontend --network number-network -p 3000:80 number-frontend
+
+#Docker Network
+
+Create network:
+
+docker network create number-network
+
+Run both containers on this network → frontend can call backend using http://backend:8000/...
+
+Port mapping (-p) exposes containers to host browser:
+
+Frontend: 3000
+
+Backend: 8000
+
+#Docker Compose Setup
+Create docker-compose.yml at project root:
+version: "3.9"
+
+services:
+  backend:
+    build: ./backend
+    container_name: backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - number-db:/app/data
+    networks:
+      - number-network
+
+  frontend:
+    build: ./frontend
+    container_name: frontend
+    ports:
+      - "3000:80"
+    networks:
+      - number-network
+
+volumes:
+  number-db:
+
+networks:
+  number-network:
+    driver: bridge
+
+Start app:
+docker-compose up -d
+
+Stop app:
+
+docker-compose down
+
+Remove volumes too (if needed):
+
+docker-compose down -v
+
+docker_commands_manual = """
+===========================
+DOCKER COMMANDS REFERENCE
+===========================
+
+1️⃣ Build Docker Image
+---------------------
+docker build -t <image-name> <folder>
+# -t = tag (name)
+# <folder> = folder with Dockerfile
+
+2️⃣ Run Container
+----------------
+docker run -d --name <container-name> -p <host-port>:<container-port> -v <volume>:<container-folder> --network <network-name> <image-name>
+# -d           = detached mode (run in background)
+# --name       = container name
+# -p           = host port : container port mapping
+# -v           = volume mapping (persistent storage)
+# --network    = attach to Docker network
+# <image-name> = image to run
+
+3️⃣ Stop Container
+-----------------
+docker stop <container-name>
+docker kill <container-name>   # force stop
+
+4️⃣ Remove Container
+-------------------
+docker rm <container-name>
+docker rm -f <container-name>  # force remove
+
+5️⃣ List Containers
+------------------
+docker ps       # running containers
+docker ps -a    # all containers (including stopped)
+
+6️⃣ List Images
+---------------
+docker images
+
+7️⃣ Volumes
+-----------
+docker volume create <volume-name>       # create volume
+docker volume ls                         # list volumes
+docker volume inspect <volume-name>      # inspect volume
+# Use volume in container: -v <volume>:<container-folder>
+
+8️⃣ Networks
+-----------
+docker network create <network-name>     # create network
+# attach container to network with --network flag
+# inside network, container names act as hostnames
+
+9️⃣ Docker Compose
+-----------------
+docker-compose up -d    # start all services in background
+docker-compose down     # stop all services
+docker-compose down -v  # stop services + remove volumes
+
+==============================================================================================

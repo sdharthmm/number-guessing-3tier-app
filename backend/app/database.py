@@ -12,7 +12,7 @@ from sqlalchemy.orm import sessionmaker
 
 # SQLite database URL
 # "sqlite:///" means local file-based database
-DATABASE_URL = "sqlite:///./scores.db"
+DATABASE_URL = "sqlite:///./data/scores.db"
 
 
 # Engine is the core interface to the database
